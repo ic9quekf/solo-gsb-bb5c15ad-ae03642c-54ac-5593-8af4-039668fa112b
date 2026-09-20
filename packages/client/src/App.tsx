@@ -5,10 +5,12 @@ import {
   MAX_FLOAT_MAX,
   MAX_FLOAT_MIN,
   checkFloats,
+  findRepeatUnit,
 } from '@jacquard/shared';
 import { api } from './api.js';
 import GridEditor from './GridEditor.js';
 import CommandEditor from './CommandEditor.js';
+import RepeatPanel from './RepeatPanel.js';
 
 const SYMBOLS = ['A', 'B', 'C'];
 const DEFAULT_WIDTH = 12;
@@ -58,6 +60,13 @@ export default function App() {
   const [selectedFloat, setSelectedFloat] = useState<FloatSpan | null>(null);
 
   /**
+   * 循环花版：行/列偏移（1 基视觉坐标，单元左上角所在行/列）。
+   * 偏移只平移循环相位，取值范围为对应周期；周期变化后自动夹回范围。
+   */
+  const [repeatRowOffset, setRepeatRowOffset] = useState(1);
+  const [repeatColOffset, setRepeatColOffset] = useState(1);
+
+  /**
    * 浮线分析完全基于视觉坐标（不随偶数行镜像），纯函数实时重算：
    * 图案绘制、行宽/行数变化、口令回写（合法行覆盖、错误行保留原图）
    * 都会更新 grid，阈值变化更新 maxFloat，二者任一变化即重新检查。
@@ -66,6 +75,37 @@ export default function App() {
     () => checkFloats(grid, maxFloat),
     [grid, maxFloat],
   );
+
+  /**
+   * 最小二维重复单元同样为纯函数实时重算：
+   * 绘制、改尺寸、口令回写后立即重新搜索。
+   * 候选按 面积 → 行数 → 列数 升序决胜；
+   * 按单元内坐标映射逐格验证，周期不要求整除行宽/行数。
+   */
+  const repeatResult = useMemo(
+    () => findRepeatUnit(grid, height, width),
+    [grid, height, width],
+  );
+
+  /** 偏移夹取到合法周期范围（初始或尺寸/图案变化后周期可能变小） */
+  const safeRowOffset = Math.min(
+    Math.max(repeatRowOffset, 1),
+    Math.max(repeatResult.rowPeriod, 1),
+  );
+  const safeColOffset = Math.min(
+    Math.max(repeatColOffset, 1),
+    Math.max(repeatResult.colPeriod, 1),
+  );
+
+  /** 周期变化导致偏移越界时回写状态 */
+  useEffect(() => {
+    if (repeatRowOffset > repeatResult.rowPeriod) {
+      setRepeatRowOffset(Math.max(repeatResult.rowPeriod, 1));
+    }
+    if (repeatColOffset > repeatResult.colPeriod) {
+      setRepeatColOffset(Math.max(repeatResult.colPeriod, 1));
+    }
+  }, [repeatResult.rowPeriod, repeatResult.colPeriod, repeatRowOffset, repeatColOffset]);
 
   /** 图案或阈值变化后，之前选中的风险条目可能已不存在，清空选中态 */
   useEffect(() => {
@@ -302,7 +342,23 @@ export default function App() {
               appliedRows={appliedRows}
               floatRisks={floatResult.risks}
               selectedFloat={selectedFloat}
+              tile={{
+                unit: {
+                  rowPeriod: repeatResult.rowPeriod,
+                  colPeriod: repeatResult.colPeriod,
+                },
+                rowOffset: safeRowOffset,
+                colOffset: safeColOffset,
+              }}
               onPaint={paint}
+            />
+            <RepeatPanel
+              result={repeatResult}
+              grid={grid}
+              rowOffset={safeRowOffset}
+              colOffset={safeColOffset}
+              onRowOffset={setRepeatRowOffset}
+              onColOffset={setRepeatColOffset}
             />
             <section className="float-panel" aria-label="浮线风险检查">
               <div className="float-head">
@@ -382,6 +438,9 @@ export default function App() {
                 </span>
                 <span className="legend-item">
                   <i className="swatch float" /> 浮线风险（超阈值，起止列描边）
+                </span>
+                <span className="legend-item">
+                  <i className="swatch repeat" /> 循环花版边界（★ 为单元起点）
                 </span>
               </div>
             </div>

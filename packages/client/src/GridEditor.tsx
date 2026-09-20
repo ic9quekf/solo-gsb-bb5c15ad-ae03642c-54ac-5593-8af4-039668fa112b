@@ -1,5 +1,19 @@
 import { useEffect, useMemo, useRef } from 'react';
-import type { FloatSpan } from '@jacquard/shared';
+import type { FloatSpan, RepeatUnit } from '@jacquard/shared';
+
+/**
+ * 循环花版边界信息（视觉坐标）：
+ * rowPeriod/colPeriod 为最小重复单元尺寸；
+ * rowOffset/colOffset 为单元左上角所在的视觉行/列（1 基，周期内取值）。
+ * 偶数行同样按视觉坐标处理，绝不镜像。
+ */
+export interface RepeatTile {
+  unit: RepeatUnit;
+  /** 1 基视觉行：单元顶边所在行 */
+  rowOffset: number;
+  /** 1 基视觉列：单元左边所在列 */
+  colOffset: number;
+}
 
 interface GridEditorProps {
   width: number;
@@ -11,6 +25,8 @@ interface GridEditorProps {
   floatRisks: FloatSpan[];
   /** 当前在风险列表中选中的浮线（来自同一 floatRisks 数组，按引用比较） */
   selectedFloat: FloatSpan | null;
+  /** 循环花版：在原网格上描出重复单元边界；null 时不绘制 */
+  tile: RepeatTile | null;
   onPaint: (row: number, col: number) => void;
 }
 
@@ -29,11 +45,25 @@ interface FloatMark {
   tip: string;
 }
 
+/** 循环花版在单格上的描边信息（四边是否落在单元分界线上） */
+interface TileMark {
+  top: boolean;
+  right: boolean;
+  bottom: boolean;
+  left: boolean;
+  /** 是否为单元起点（偏移指定的左上角） */
+  anchor: boolean;
+}
+
+/** 分界线描边色（与浮线红、主色蓝区分） */
+const TILE_LINE = '#0e9488';
+
 /**
  * 定宽符号网格。
  * 关键约束：视觉坐标恒定——列 0 始终在最左；
  * 偶数行行首用 ← 标注实际编织方向，但该行绝不做视觉镜像。
  * 浮线风险同样按视觉坐标标注：起止列描边、区间下划红线，不随偶数行翻转。
+ * 循环花版边界也按视觉坐标的行/列偏移取模描边，偶数行不镜像。
  */
 export default function GridEditor({
   width,
@@ -43,6 +73,7 @@ export default function GridEditor({
   appliedRows,
   floatRisks,
   selectedFloat,
+  tile,
   onPaint,
 }: GridEditorProps) {
   const painting = useRef(false);
@@ -69,6 +100,54 @@ export default function GridEditor({
     }
     return marks;
   }, [floatRisks, selectedFloat]);
+
+  /**
+   * 循环花版边界：对每个视觉格判断其四条边是否落在单元分界线上。
+   * 分界线条件（r 为 0 基视觉行、c 为 0 基视觉列，偏移也是 0 基）：
+   *   水平边（行方向）：(r - rowOffset0) 对行周期取模 === 0
+   *   垂直边（列方向）：(c - colOffset0) 对列周期取模 === 0
+   * 取模对非整除行宽同样成立；周期为 1 时每个格之间都有分界线。
+   * 全程视觉坐标，偶数行不做任何翻转。
+   */
+  const tileMarks = useMemo(() => {
+    const marks = new Map<string, TileMark>();
+    if (!tile || width === 0 || height === 0) return marks;
+    const ph = tile.unit.rowPeriod;
+    const pw = tile.unit.colPeriod;
+    const r0 = ((tile.rowOffset - 1) % height + height) % height;
+    const c0 = ((tile.colOffset - 1) % width + width) % width;
+    const onH = (r: number) => ((r - r0) % ph + ph) % ph === 0;
+    const onV = (c: number) => ((c - c0) % pw + pw) % pw === 0;
+    for (let r = 0; r < height; r += 1) {
+      for (let c = 0; c < width; c += 1) {
+        const mark: TileMark = {
+          top: onH(r),
+          bottom: onH(r + 1),
+          left: onV(c),
+          right: onV(c + 1),
+          anchor: r === r0 && c === c0,
+        };
+        if (mark.top || mark.bottom || mark.left || mark.right) {
+          marks.set(`${r}-${c}`, mark);
+        }
+      }
+    }
+    return marks;
+  }, [tile, width, height]);
+
+  /** 单元分界线与错误行红框共用 inset shadow，避免互相覆盖 */
+  const tileShadow = (r: number, c: number, hasError: boolean): string => {
+    const m = tileMarks.get(`${r}-${c}`);
+    const shadows: string[] = [];
+    if (m) {
+      if (m.top) shadows.push(`inset 0 2px 0 0 ${TILE_LINE}`);
+      if (m.bottom) shadows.push(`inset 0 -2px 0 0 ${TILE_LINE}`);
+      if (m.left) shadows.push(`inset 2px 0 0 0 ${TILE_LINE}`);
+      if (m.right) shadows.push(`inset -2px 0 0 0 ${TILE_LINE}`);
+    }
+    if (hasError) shadows.push('inset 0 0 0 2px rgba(214, 69, 69, 0.55)');
+    return shadows.join(', ');
+  };
 
   /** 选中风险条目后，把该浮线起始列滚动到可视区域 */
   useEffect(() => {
@@ -129,18 +208,30 @@ export default function GridEditor({
                 {Array.from({ length: width }, (_, c) => {
                   const symbol = grid[r]?.[c] ?? '';
                   const mark = floatMarks.get(`${r}-${c}`);
+                  const tmark = tileMarks.get(`${r}-${c}`);
                   const cellClasses = ['grid-cell', SYMBOL_CLASS[symbol] ?? ''];
                   if (mark) cellClasses.push('float-risk');
                   if (mark?.anchor) cellClasses.push('float-anchor');
                   if (mark?.selected) cellClasses.push('float-selected');
+                  if (tmark) cellClasses.push('repeat-cell');
+                  if (tmark?.anchor) cellClasses.push('repeat-anchor-cell');
+                  const shadow = tileShadow(r, c, rowIssueMap.has(r1));
                   const baseTitle = `第 ${r1} 行 第 ${c + 1} 列（视觉坐标）`;
+                  const tileTitle = tmark
+                    ? `循环单元分界线（视觉坐标，偶数行不镜像）${
+                        tmark.anchor ? '；★ 单元起点' : ''
+                      }`
+                    : '';
                   return (
                     <td key={c} className="grid-cell-td">
                       <button
                         type="button"
                         data-cell={`${r}-${c}`}
                         className={cellClasses.join(' ')}
-                        title={mark ? `${baseTitle}｜${mark.tip}` : baseTitle}
+                        style={shadow ? { boxShadow: shadow } : undefined}
+                        title={[baseTitle, mark?.tip, tileTitle]
+                          .filter(Boolean)
+                          .join('｜')}
                         onPointerDown={(e) => {
                           e.preventDefault();
                           painting.current = true;
@@ -151,6 +242,11 @@ export default function GridEditor({
                         }}
                       >
                         {symbol}
+                        {tmark?.anchor && (
+                          <span className="repeat-anchor-dot" aria-hidden>
+                            ★
+                          </span>
+                        )}
                       </button>
                     </td>
                   );

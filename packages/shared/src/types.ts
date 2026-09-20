@@ -103,3 +103,33 @@ export interface FloatCheckResult {
   /** 超过阈值的浮线（spans 的子集，同样按视觉坐标排序） */
   risks: FloatSpan[];
 }
+
+/**
+ * 二维重复单元（循环花版）：整张网格按行周期 rowPeriod、
+ * 列周期 colPeriod 循环重复。
+ *
+ * 周期**不要求整除**行数/行宽——验证时必须对每一格按
+ * (r % rowPeriod, c % colPeriod) 映射回单元内坐标逐格比较，
+ * 不能只比较左上角第一块（或整数个整块），否则余数部分的
+ * 不一致会被漏掉而误判。
+ */
+export interface RepeatUnit {
+  /** 行方向周期（单元行数）；1 表示各行内容完全相同 */
+  rowPeriod: number;
+  /** 列方向周期（单元列数）；1 表示每行自身无横向变化 */
+  colPeriod: number;
+}
+
+export interface RepeatSearchResult extends RepeatUnit {
+  /** 整幅网格行数 / 列数 */
+  rows: number;
+  cols: number;
+  /** 最小单元面积（格数） */
+  unitCells: number;
+  /** 整幅面积（格数） */
+  gridCells: number;
+  /** 压缩比 = gridCells / unitCells；周期不整除时可能为小数 */
+  ratio: number;
+  /** 最小单元是否就是整幅（未发现更小的重复单元） */
+  trivial: boolean;
+}
