@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useRef } from 'react';
+import type { CSSProperties } from 'react';
 import type { FloatSpan } from '@jacquard/shared';
+
+/** 循环花版单元边界叠加（视觉坐标相位） */
+export interface RepeatOverlay {
+  /** 单元行数（垂直周期） */
+  rowPeriod: number;
+  /** 单元列数（水平周期） */
+  colPeriod: number;
+  /** 行相位偏移（0..rowPeriod-1，视觉坐标） */
+  rowOffset: number;
+  /** 列相位偏移（0..colPeriod-1，视觉坐标） */
+  colOffset: number;
+}
 
 interface GridEditorProps {
   width: number;
@@ -11,6 +24,8 @@ interface GridEditorProps {
   floatRisks: FloatSpan[];
   /** 当前在风险列表中选中的浮线（来自同一 floatRisks 数组，按引用比较） */
   selectedFloat: FloatSpan | null;
+  /** 循环花版单元边界叠加；null 表示不绘制 */
+  repeatOverlay: RepeatOverlay | null;
   onPaint: (row: number, col: number) => void;
 }
 
@@ -34,6 +49,7 @@ interface FloatMark {
  * 关键约束：视觉坐标恒定——列 0 始终在最左；
  * 偶数行行首用 ← 标注实际编织方向，但该行绝不做视觉镜像。
  * 浮线风险同样按视觉坐标标注：起止列描边、区间下划红线，不随偶数行翻转。
+ * 循环花版边界按单元周期与视觉坐标相位描线，同样不做镜像。
  */
 export default function GridEditor({
   width,
@@ -43,6 +59,7 @@ export default function GridEditor({
   appliedRows,
   floatRisks,
   selectedFloat,
+  repeatOverlay,
   onPaint,
 }: GridEditorProps) {
   const painting = useRef(false);
@@ -86,6 +103,31 @@ export default function GridEditor({
     if (selectedFloat && selectedFloat.row === r1)
       classes.push('row-float-selected');
     return classes.join(' ');
+  };
+
+  /**
+   * 循环花版单元边界：按视觉坐标相位 (rowOffset, colOffset) 以
+   * (rowPeriod, colPeriod) 为周期逐格描线；网格外缘自动闭合边界处的
+   * 残缺单元。与错误行的红色内阴影合成，避免样式互相覆盖。
+   */
+  const repeatCellStyle = (
+    r: number,
+    c: number,
+    hasIssue: boolean,
+  ): CSSProperties | undefined => {
+    if (!repeatOverlay) return undefined;
+    const { rowPeriod, colPeriod, rowOffset, colOffset } = repeatOverlay;
+    const rm = (((r - rowOffset) % rowPeriod) + rowPeriod) % rowPeriod;
+    const cm = (((c - colOffset) % colPeriod) + colPeriod) % colPeriod;
+    const shadows: string[] = [];
+    if (hasIssue) shadows.push('inset 0 0 0 2px rgba(214, 69, 69, 0.55)');
+    if (rm === 0 || r === 0) shadows.push('inset 0 3px 0 var(--rep)');
+    if (cm === 0 || c === 0) shadows.push('inset 3px 0 0 var(--rep)');
+    if (rm === rowPeriod - 1 || r === height - 1)
+      shadows.push('inset 0 -3px 0 var(--rep)');
+    if (cm === colPeriod - 1 || c === width - 1)
+      shadows.push('inset -3px 0 0 var(--rep)');
+    return shadows.length > 0 ? { boxShadow: shadows.join(', ') } : undefined;
   };
 
   return (
@@ -140,6 +182,7 @@ export default function GridEditor({
                         type="button"
                         data-cell={`${r}-${c}`}
                         className={cellClasses.join(' ')}
+                        style={repeatCellStyle(r, c, issue !== undefined)}
                         title={mark ? `${baseTitle}｜${mark.tip}` : baseTitle}
                         onPointerDown={(e) => {
                           e.preventDefault();

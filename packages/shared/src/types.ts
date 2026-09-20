@@ -103,3 +103,26 @@ export interface FloatCheckResult {
   /** 超过阈值的浮线（spans 的子集，同样按视觉坐标排序） */
   risks: FloatSpan[];
 }
+
+/**
+ * 循环花版：最小二维重复单元的搜索结果。
+ * 全部使用视觉坐标——重复单元与奇偶行编织方向无关，偶数行绝不镜像。
+ */
+export interface RepeatResult {
+  /** 单元行数（垂直周期） */
+  unitRows: number;
+  /** 单元列数（水平周期） */
+  unitCols: number;
+  /** 单元面积（格数）= unitRows × unitCols */
+  unitArea: number;
+  /** 单元内容（视觉坐标，锚定于网格左上角的零偏移相位） */
+  cells: string[][];
+  /** 整幅行数 */
+  gridRows: number;
+  /** 整幅列数 */
+  gridCols: number;
+  /** 整幅总格数 = gridRows × gridCols */
+  totalCells: number;
+  /** 压缩比 = totalCells / unitArea（≥ 1） */
+  ratio: number;
+}

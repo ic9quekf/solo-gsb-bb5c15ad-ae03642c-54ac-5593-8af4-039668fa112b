@@ -5,10 +5,12 @@ import {
   MAX_FLOAT_MAX,
   MAX_FLOAT_MIN,
   checkFloats,
+  findMinRepeatUnit,
 } from '@jacquard/shared';
 import { api } from './api.js';
 import GridEditor from './GridEditor.js';
 import CommandEditor from './CommandEditor.js';
+import RepeatPanel from './RepeatPanel.js';
 
 const SYMBOLS = ['A', 'B', 'C'];
 const DEFAULT_WIDTH = 12;
@@ -71,6 +73,19 @@ export default function App() {
   useEffect(() => {
     setSelectedFloat(null);
   }, [grid, maxFloat]);
+
+  /**
+   * 循环花版：最小二维重复单元搜索，纯函数实时重算——
+   * 图案绘制、行宽/行数变化、口令回写都会更新 grid，随之立即重算。
+   * 与浮线检查一致，完全基于视觉坐标，偶数行不镜像。
+   */
+  const repeatResult = useMemo(() => findMinRepeatUnit(grid), [grid]);
+
+  /** 单元相位偏移（视觉坐标）；单元尺寸变化后归零，避免越界相位 */
+  const [repeatOffset, setRepeatOffset] = useState({ r: 0, c: 0 });
+  useEffect(() => {
+    setRepeatOffset({ r: 0, c: 0 });
+  }, [repeatResult.unitRows, repeatResult.unitCols]);
 
   /** 口令文本是否与当前网格一致（未手工修改） */
   const syncedText = useRef<string | null>(null);
@@ -302,6 +317,16 @@ export default function App() {
               appliedRows={appliedRows}
               floatRisks={floatResult.risks}
               selectedFloat={selectedFloat}
+              repeatOverlay={
+                repeatResult.unitRows > 0
+                  ? {
+                      rowPeriod: repeatResult.unitRows,
+                      colPeriod: repeatResult.unitCols,
+                      rowOffset: repeatOffset.r,
+                      colOffset: repeatOffset.c,
+                    }
+                  : null
+              }
               onPaint={paint}
             />
             <section className="float-panel" aria-label="浮线风险检查">
@@ -361,6 +386,11 @@ export default function App() {
                 </ul>
               )}
             </section>
+            <RepeatPanel
+              repeat={repeatResult}
+              offset={repeatOffset}
+              onOffsetChange={setRepeatOffset}
+            />
             <div className="action-bar">
               <button
                 type="button"
@@ -382,6 +412,9 @@ export default function App() {
                 </span>
                 <span className="legend-item">
                   <i className="swatch float" /> 浮线风险（超阈值，起止列描边）
+                </span>
+                <span className="legend-item">
+                  <i className="swatch rep" /> 循环花版单元边界（视觉坐标）
                 </span>
               </div>
             </div>
